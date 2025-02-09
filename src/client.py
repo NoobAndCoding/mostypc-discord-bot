@@ -1,6 +1,6 @@
 import nextcord
 from nextcord import SelectOption, SlashOption
-from nextcord.ext import commands, tasks
+from nextcord.ext import commands, tasks, application_checks
 import asyncio
 from setup import setup_manager
 import os
@@ -40,7 +40,7 @@ async def qotd_loop():
         qotd_data["question3"] = None  # Clear last slot
 
 @bot.event
-async def on_ready():
+async def on_ready(interaction: nextcord.Interaction):
     print(f"Logged in as {bot.user}")
     bot.db = await aiosqlite.connect("src/setup/database/warnings.db")
     await asyncio.sleep(3)
@@ -48,6 +48,7 @@ async def on_ready():
     async with bot.db.cursor() as cursor:
         await cursor.execute("CREATE TABLE IF NOT EXISTS warnings(user INTEGER, reason TEXT, time INTEGER, guild INTEGER, warning_id INTEGER PRIMARY KEY)")
     await bot.db.commit()
+    await bot.process_application_commands(interaction)
 
 async def addwarn(interaction: nextcord.Interaction, user, reason):
     async with bot.db.cursor() as cursor:
@@ -55,7 +56,7 @@ async def addwarn(interaction: nextcord.Interaction, user, reason):
     await bot.db.commit()
 
 @bot.slash_command(guild_ids=[1325874756624318515], description = "Warns a user")
-@nextcord.ext.application_checks.has_permissions(administrator = True)
+@application_checks.has_permissions(manage_messages = True)
 async def warn(interaction: nextcord.Interaction, member: nextcord.Member, reason: str = "No reason provided."):
     await addwarn(interaction, member, reason )
 
@@ -71,7 +72,7 @@ async def warn(interaction: nextcord.Interaction, member: nextcord.Member, reaso
     await interaction.send(embed = embed)
 
 @bot.slash_command(guild_ids = [1325874756624318515], description = "Remove's a user's warning")
-@nextcord.ext.application_checks.has_permissions(administrator = True)
+@application_checks.has_permissions(manage_messages = True)
 async def remove_warning(interaction: nextcord.Interaction, member: nextcord.Member, warning_id):
     async with bot.db.cursor() as cursor:
         await cursor.execute("SELECT reason FROM warnings WHERE user = ? AND guild = ? AND warning_id = ?", (member.id, interaction.guild_id, warning_id))
@@ -100,9 +101,10 @@ async def remove_warning(interaction: nextcord.Interaction, member: nextcord.Mem
 
             await interaction.send(embed = embed)
     await bot.db.commit()
+    await bot.process_application_commands(interaction)
 
 @bot.slash_command(guild_ids=[1325874756624318515], description = "Show a user's warnings")
-@nextcord.ext.application_checks.has_permissions(administrator = True)
+@application_checks.has_permissions(manage_messages = True)
 async def show_warnings(interaction: nextcord.Interaction, member: nextcord.Member):
     async with bot.db.cursor() as cursor:
         await cursor.execute("SELECT reason, time, warning_id FROM warnings WHERE user = ? and guild = ?", (member.id, interaction.guild_id))
@@ -130,6 +132,7 @@ async def show_warnings(interaction: nextcord.Interaction, member: nextcord.Memb
             embed.set_thumbnail(url = f"{member.avatar.url}")
             await interaction.send(embed = embed)
     await bot.db.commit()
+    await bot.process_application_commands(interaction)
 
 @bot.event
 async def on_member_join(member: nextcord.Member):
@@ -202,12 +205,20 @@ class MySelect(nextcord.ui.Select):
 
 
 @bot.slash_command(guild_ids = [1325874756624318515])
-@nextcord.ext.application_checks.has_permissions(administrator = True)
+@application_checks.has_permissions(manage_messages = True)
 async def add_qotd(interaction: nextcord.Interaction, question):
     await interaction.send(view=MyView())
+    embed = nextcord.Embed(
+        color = nextcord.Color.blurple(),
+        type = "rich",
+        title = "Command Log",
+        description = f"{interaction.user.mention} used the command: \"add_qotd\""
+    )
+    embed.set_thumbnail(url = f"{interaction.user.avatar.url}")
+    await bot.process_application_commands(interaction)
 
 @bot.slash_command(guild_ids = [1325874756624318515])
-@nextcord.ext.application_checks.has_permissions(administrator = True)
+@application_checks.has_permissions(manage_messages = True)
 async def show_qotd(interaction: nextcord.Interaction):
     view = MyView()
     
@@ -219,6 +230,16 @@ async def show_qotd(interaction: nextcord.Interaction):
         color = nextcord.Color.blurple()
     )
     await interaction.send(embed=embed)
+    embed = nextcord.Embed(
+        color = nextcord.Color.blurple(),
+        type = "rich",
+        title = "Command Log",
+        description = f"{interaction.user.mention} used the command: \"show_qotd\""
+    )
+    embed.set_thumbnail(url = f"{interaction.user.avatar.url}")
+    await interaction.send(embed=embed)
+    await bot.process_application_commands(interaction)
+    
 
 current_count = 0
 last_user = None
@@ -275,5 +296,6 @@ async def leaderboard(interaction):
         embed.add_field(name=f"#{rank} {user.display_name}", value=f"✅ {score} counts", inline=False)
 
     await interaction.send(embed=embed, delete_after=45)  # ⏳ Auto-delete after 45 seconds
+    await bot.process_application_commands(interaction)
 
 bot.run(os.getenv("TOKEN"))
