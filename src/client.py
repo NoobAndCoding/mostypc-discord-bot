@@ -220,9 +220,9 @@ async def show_qotd(interaction: nextcord.Interaction):
     
     embed = nextcord.Embed(
         title = "Showing QOTD Queue",
-        description=f"**Question 1:** {qotd_data["question1"] or 'Empty'}\n"
-                    f"**Question 2:** {qotd_data["question2"] or 'Empty'}\n"
-                    f"**Question 3:** {qotd_data["question3"] or 'Empty'}",
+        description=f"**Question 1:** { qotd_data.get("question1", "Empty") } \n "
+                    f"**Question 2:** { qotd_data.get("question2", "Empty") } \n "
+                    f"**Question 3:** { qotd_data.get("question3", "empty") } ",
         color = nextcord.Color.blurple()
     )
     await interaction.send(embed=embed)
