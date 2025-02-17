@@ -40,7 +40,7 @@ async def qotd_loop():
         qotd_data["question3"] = None  # Clear last slot
 
 @bot.event
-async def on_ready(interaction: nextcord.Interaction):
+async def on_ready():
     print(f"Logged in as {bot.user}")
     bot.db = await aiosqlite.connect("src/setup/database/warnings.db")
     await asyncio.sleep(3)
@@ -48,7 +48,6 @@ async def on_ready(interaction: nextcord.Interaction):
     async with bot.db.cursor() as cursor:
         await cursor.execute("CREATE TABLE IF NOT EXISTS warnings(user INTEGER, reason TEXT, time INTEGER, guild INTEGER, warning_id INTEGER PRIMARY KEY)")
     await bot.db.commit()
-    await bot.process_application_commands(interaction)
 
 async def addwarn(interaction: nextcord.Interaction, user, reason):
     async with bot.db.cursor() as cursor:
@@ -101,7 +100,6 @@ async def remove_warning(interaction: nextcord.Interaction, member: nextcord.Mem
 
             await interaction.send(embed = embed)
     await bot.db.commit()
-    await bot.process_application_commands(interaction)
 
 @bot.slash_command(guild_ids=[1325874756624318515], description = "Show a user's warnings")
 @application_checks.has_permissions(manage_messages = True)
@@ -132,7 +130,6 @@ async def show_warnings(interaction: nextcord.Interaction, member: nextcord.Memb
             embed.set_thumbnail(url = f"{member.avatar.url}")
             await interaction.send(embed = embed)
     await bot.db.commit()
-    await bot.process_application_commands(interaction)
 
 @bot.event
 async def on_member_join(member: nextcord.Member):
@@ -215,7 +212,6 @@ async def add_qotd(interaction: nextcord.Interaction, question):
         description = f"{interaction.user.mention} used the command: \"add_qotd\""
     )
     embed.set_thumbnail(url = f"{interaction.user.avatar.url}")
-    await bot.process_application_commands(interaction)
 
 @bot.slash_command(guild_ids = [1325874756624318515])
 @application_checks.has_permissions(manage_messages = True)
@@ -238,7 +234,6 @@ async def show_qotd(interaction: nextcord.Interaction):
     )
     embed.set_thumbnail(url = f"{interaction.user.avatar.url}")
     await interaction.send(embed=embed)
-    await bot.process_application_commands(interaction)
     
 
 current_count = 0
@@ -296,6 +291,5 @@ async def leaderboard(interaction):
         embed.add_field(name=f"#{rank} {user.display_name}", value=f"✅ {score} counts", inline=False)
 
     await interaction.send(embed=embed, delete_after=45)  # ⏳ Auto-delete after 45 seconds
-    await bot.process_application_commands(interaction)
 
 bot.run(os.getenv("TOKEN"))
