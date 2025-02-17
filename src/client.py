@@ -11,9 +11,9 @@ from collections import defaultdict
 import aiosqlite
 
 qotd_data = {
-    "question1": None,
-    "question2": None,
-    "question3": None
+    "question1": "Empty",
+    "question2": "Empty",
+    "question3": "Empty"
 }
 
 COUNTING_CHANNEL_ID = 1325876822436479028
@@ -218,14 +218,14 @@ async def add_qotd(interaction: nextcord.Interaction, question):
 async def show_qotd(interaction: nextcord.Interaction):
     view = MyView()
     
-    embed = nextcord.Embed(
+    embed1 = nextcord.Embed(
         title = "Showing QOTD Queue",
-        description=f"**Question 1:** { qotd_data.get("question1", "Empty") } \n "
-                    f"**Question 2:** { qotd_data.get("question2", "Empty") } \n "
-                    f"**Question 3:** { qotd_data.get("question3", "empty") } ",
+        description= f"**Question 1:** { qotd_data.get("question1", "Empty") } \n "
+                     f"**Question 2:** { qotd_data.get("question2", "Empty") } \n "
+                     f"**Question 3:** { qotd_data.get("question3", "empty") } ",
         color = nextcord.Color.blurple()
     )
-    await interaction.send(embed=embed)
+    await interaction.send(embed=embed1)
     embed = nextcord.Embed(
         color = nextcord.Color.blurple(),
         type = "rich",
