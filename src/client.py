@@ -6,7 +6,6 @@ from setup import setup_manager
 import os
 from nextcord.ui import View, Select
 import datetime
-import requests
 from collections import defaultdict
 import aiosqlite
 
