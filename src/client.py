@@ -7,7 +7,9 @@ import os
 from nextcord.ui import View, Select
 import datetime
 from collections import defaultdict
-import aiosqlite
+import aiomysql
+import random
+from easy_pil import *
 
 qotd_data = {
     "question1": "Empty",
@@ -19,6 +21,16 @@ COUNTING_CHANNEL_ID = 1325876822436479028
 QOTD_CHANNEL_ID = 1325877008655450183
 
 bot = commands.Bot(command_prefix = "?", intents = nextcord.Intents.all())
+
+async def create_pool():
+    bot.db = await aiomysql.create_pool(
+        host=os.getenv("DB_HOST"),
+        port = 3306,
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASS"),
+        db=os.getenv("DB_NAME"),
+        autocommit=True
+    )
 
 @tasks.loop(hours=24)  # Run every 24 hours
 async def qotd_loop():
@@ -41,94 +53,109 @@ async def qotd_loop():
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
-    bot.db = await aiosqlite.connect("src/setup/database/warnings.db")
-    await asyncio.sleep(3)
-    print("database connected")
-    async with bot.db.cursor() as cursor:
-        await cursor.execute("CREATE TABLE IF NOT EXISTS warnings(user INTEGER, reason TEXT, time INTEGER, guild INTEGER, warning_id INTEGER PRIMARY KEY)")
-    await bot.db.commit()
+    await create_pool()
+    print("Database connected")
+
+    async with bot.db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS warnings (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    user BIGINT,
+                    reason TEXT,
+                    time INT,
+                    guild BIGINT
+                )
+            """
+            )
+            await cursor.execute("""
+                CREATE TABLE IF NOT EXISTS levels (
+                    user BIGINT,
+                    guild BIGINT,
+                    level INT DEFAULT 0,
+                    xp INT DEFAULT 0,
+                    PRIMARY KEY (user, guild)
+                )
+            """
+            )
 
 async def addwarn(interaction: nextcord.Interaction, user, reason):
-    async with bot.db.cursor() as cursor:
-        await cursor.execute("INSERT INTO warnings (user, reason, time, guild) VALUES (?, ?, ?, ?)", (user.id, reason, int(datetime.datetime.now().timestamp()), interaction.guild_id))
-    await bot.db.commit()
+    async with bot.db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute(
+                "INSERT INTO warnings (user, reason, time, guild) VALUES (%s, %s, %s, %s)",
+                (user.id, reason, int(datetime.datetime.now().timestamp()), interaction.guild_id)
+            )
 
-@bot.slash_command(guild_ids=[1325874756624318515], description = "Warns a user")
-@application_checks.has_permissions(manage_messages = True)
+@bot.slash_command(guild_ids=[1325874756624318515], description="Warns a user")
+@application_checks.has_permissions(manage_messages=True)
 async def warn(interaction: nextcord.Interaction, member: nextcord.Member, reason: str = "No reason provided."):
-    await addwarn(interaction, member, reason )
-
+    await addwarn(interaction, member, reason)
     embed = nextcord.Embed(
-        color = nextcord.Color.green(),
-        type = "rich",
-        title = "Succesfully logged warning action",
-        description = f"Succesfully warned <@{member.id}> for: {reason}"
+        color=nextcord.Color.green(),
+        title="Successfully logged warning",
+        description=f"Warned {member.mention} for: {reason}"
     )
+    embed.set_thumbnail(url=member.avatar.url)
+    await interaction.send(embed=embed)
 
-    embed.set_thumbnail(url = f"{member.avatar.url}")
 
-    await interaction.send(embed = embed)
+@bot.slash_command(guild_ids=[1325874756624318515], description="Remove's a user's warning")
+@application_checks.has_permissions(manage_messages=True)
+async def remove_warning(interaction: nextcord.Interaction, member: nextcord.Member, warning_id: int):
+    async with bot.db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT reason FROM warnings WHERE user = %s AND guild = %s AND id = %s", (member.id, interaction.guild_id, warning_id))
+            data = await cursor.fetchone()
+            if data:
+                await cursor.execute("DELETE FROM warnings WHERE user = %s AND guild = %s AND id = %s", (member.id, interaction.guild_id, warning_id))
+                embed = nextcord.Embed(
+                    color=nextcord.Color.red(),
+                    type="rich",
+                    title="Successfully logged warning action",
+                    description=f"Successfully removed warning from <@{member.id}>"
+                )
+                embed.set_thumbnail(url=member.avatar.url)
+                await interaction.send(embed=embed)
+            else:
+                embed = nextcord.Embed(
+                    title="404!",
+                    description=f"No warnings found under <@{member.id}>'s account!",
+                    colour=nextcord.Color.red(),
+                    type="rich"
+                )
+                embed.set_thumbnail(url=member.avatar.url)
+                await interaction.send(embed=embed)
+    await bot.db.acquire()
 
-@bot.slash_command(guild_ids = [1325874756624318515], description = "Remove's a user's warning")
-@application_checks.has_permissions(manage_messages = True)
-async def remove_warning(interaction: nextcord.Interaction, member: nextcord.Member, warning_id):
-    async with bot.db.cursor() as cursor:
-        await cursor.execute("SELECT reason FROM warnings WHERE user = ? AND guild = ? AND warning_id = ?", (member.id, interaction.guild_id, warning_id))
-        data = await cursor.fetchone()
-        if data:
-            await cursor.execute("DELETE FROM warnings WHERE user = ? AND guild = ? AND warning_id = ?", (member.id, interaction.guild_id, warning_id))
-            embed = nextcord.Embed(
-                color = nextcord.Color.red(),
-                type = "rich",
-                title = "Succesfully logged warning action",
-                description = f"Succesfully removed warning from <@{member.id}>"
-            )
-
-            embed.set_thumbnail(url = f"{member.avatar.url}")
-
-            await interaction.send(embed = embed)
-        else:
-            embed = nextcord.Embed(
-                title = "404!",
-                description = f"No warnings found under <@{member.id}>'s account!",
-                colour = nextcord.Color.red(),
-                type = "rich"
-            )
-
-            embed.set_thumbnail(url = f"{member.avatar.url}")
-
-            await interaction.send(embed = embed)
-    await bot.db.commit()
-
-@bot.slash_command(guild_ids=[1325874756624318515], description = "Show a user's warnings")
-@application_checks.has_permissions(manage_messages = True)
+@bot.slash_command(guild_ids=[1325874756624318515], description="Show a user's warnings")
+@application_checks.has_permissions(manage_messages=True)
 async def show_warnings(interaction: nextcord.Interaction, member: nextcord.Member):
-    async with bot.db.cursor() as cursor:
-        await cursor.execute("SELECT reason, time, warning_id FROM warnings WHERE user = ? and guild = ?", (member.id, interaction.guild_id))
-        data = await cursor.fetchall()
-        if data:
-            embed = nextcord.Embed(
-                color = nextcord.Color.blurple(),
-                type = "rich",
-                description = f"### {member.mention}'s warnings"
-            )
-            warnnum = 0
-            for table in data:
-                warnnum += 1
-                embed.add_field(name = f"Warning No{warnnum}", value = f"Reason: {table[0]} \n Date Issued: <t:{int(table[1])}:F> \n Warning ID: {table[2]}", inline = False)
-                embed.set_thumbnail(url = f"{member.avatar.url}")
-            await interaction.send(embed = embed)
-        else:
-            embed = nextcord.Embed(
-                title = "404!",
-                description = f"No warnings found under <@{member.id}>'s account!",
-                colour = nextcord.Color.red(),
-                type = "rich"
-            )
-
-            embed.set_thumbnail(url = f"{member.avatar.url}")
-            await interaction.send(embed = embed)
-    await bot.db.commit()
+    async with bot.db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT reason, time, id FROM warnings WHERE user = %s and guild = %s", (member.id, interaction.guild_id))
+            data = await cursor.fetchall()
+            if data:
+                embed = nextcord.Embed(
+                    color=nextcord.Color.blurple(),
+                    type="rich",
+                    description=f"### {member.mention}'s warnings"
+                )
+                warnnum = 0
+                for table in data:
+                    warnnum += 1
+                    embed.add_field(name=f"Warning No{warnnum}", value=f"Reason: {table[0]} \n Date Issued: <t:{int(table[1])}:F> \n Warning ID: {table[2]}", inline=False)
+                    embed.set_thumbnail(url=member.avatar.url)
+                await interaction.send(embed=embed)
+            else:
+                embed = nextcord.Embed(
+                    title="404!",
+                    description=f"No warnings found under <@{member.id}>'s account!",
+                    colour=nextcord.Color.red(),
+                    type="rich"
+                )
+                embed.set_thumbnail(url=member.avatar.url)
+                await interaction.send(embed=embed)
 
 @bot.event
 async def on_member_join(member: nextcord.Member):
@@ -290,5 +317,90 @@ async def leaderboard(interaction):
         embed.add_field(name=f"#{rank} {user.display_name}", value=f"✅ {score} counts", inline=False)
 
     await interaction.send(embed=embed, delete_after=45)  # ⏳ Auto-delete after 45 seconds
+
+@bot.event
+async def on_message(message: nextcord.Message):
+    if message.author.bot:
+        return
+    author = message.author
+    guild = message.guild
+    async with bot.db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT xp, level FROM levels WHERE user = %s AND guild = %s", (author.id, guild.id))
+            result = await cursor.fetchone()
+            
+            if not result:
+                await cursor.execute("INSERT INTO levels (user, guild, level, xp) VALUES (%s, %s, %s, %s)", (author.id, guild.id, 0, 0))
+                xp, level = 0, 0
+            else:
+                xp, level = result
+
+            xp += random.randint(2, 4)
+            if xp >= 100:
+                level += 1
+                xp = 0
+                await message.channel.send(f"{author.mention} has leveled up to level **{level}**!")
+            
+            await cursor.execute("UPDATE levels SET xp = %s, level = %s WHERE user = %s AND guild = %s", (xp, level, author.id, guild.id))
+    
+    await bot.process_commands(message)
+
+
+
+@bot.command(aliases=["lvl", "r", "l"])
+async def level(ctx: commands.Context, member: nextcord.Member = None):
+    if member is None:
+        member = ctx.author
+    async with bot.db.acquire() as conn:
+        async with conn.cursor() as cursor:
+            await cursor.execute("SELECT xp, level FROM levels WHERE user = %s AND guild = %s", (ctx.author.id, ctx.guild.id))
+            result = await cursor.fetchone()
+
+            if not result[0] or not result[1]:
+                await cursor.execute("INSERT IGNORE INTO levels (level, xp, user, guild) VALUES (%s, %s, %s, %s)", (0, 0, ctx.author.id, ctx.guild.id))
+                await bot.db.acquire()
+
+            try:
+                xp = result[0]
+                level = result[1]
+            except TypeError:
+                xp = 0
+                level = 0
+
+            user_data = {
+                "name": f"{member.name}#{member.discriminator}",
+                "xp": xp,
+                "level": level,
+                "next_level_xp": 100,
+                "percentage": xp,
+            }
+
+            background_picture = load_image("https://fv5-3.files.fm/thumb_show.php?i=2qj7e9k5gx&view&v=1&PHPSESSID=6c183193f76950210215614bff7bb1747b9bd197")
+            background1 = Editor(background_picture)
+            background = Editor(Canvas((900, 300), color = "#FFFFFF"))
+            profile_picture = await load_image_async(str(member.avatar.url))
+            profile = Editor(profile_picture).resize((150, 150)).circle_image()
+            
+            poppins = Font.poppins(variant = "bold", size = 40)
+            poppins_small = Font.poppins(size = 30)
+
+            background.paste(background1, (0, 0))
+
+            background.rectangle((28, 28), width = 154, height = 154, radius = 77, color = "black")
+            background.paste(profile, (30, 30))
+            
+            background.rectangle((30, 220), width = 840, height = 40, color = "#FFFFFF", radius = 5, outline = "black", stroke_width = 2)
+            background.bar((30, 220), max_width = 840, height = 40, percentage = user_data["percentage"], color = "black", radius = 5)
+
+            background.text((200, 40), user_data["name"], font = poppins, )
+
+            background.rectangle((200, 100), width = 350, height = 2, fill = "black")
+
+            background.text((200, 110), f"Level - {user_data["level"]}", font = poppins_small)
+            background.text((200, 135), f"XP - {user_data["xp"]}/{user_data["next_level_xp"]}", font = poppins_small)
+
+            file = nextcord.File(fp = background.image_bytes, filename = "levelcard.png")
+
+    await ctx.channel.send(file = file)
 
 bot.run(os.getenv("TOKEN"))
